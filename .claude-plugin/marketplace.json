@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "mcp-guard",
-      "source": ".",
+      "source": { "source": "github", "repo": "imfht/mcp-guard" },
       "description": "Security guard for MCP tools: logs, audits, and blocks suspicious MCP tool calls and server configs.",
       "category": "security",
       "tags": ["mcp", "security", "audit", "guard"]
