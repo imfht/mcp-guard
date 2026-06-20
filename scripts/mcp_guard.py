@@ -643,12 +643,230 @@ def cmd_inspect() -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Reporting: terminal + HTML
+# --------------------------------------------------------------------------- #
+
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text() or "{}")
+    except Exception:
+        return {}
+
+
+def _load_log(limit: int = 200) -> list:
+    out = []
+    try:
+        lines = log_path().read_text().splitlines()
+    except Exception:
+        return out
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            pass
+        if len(out) >= limit:
+            break
+    return list(reversed(out))
+
+
+def _log_stats(logs: list) -> dict:
+    stats = {"total": 0, "allowed": 0, "flagged": 0, "blocked": 0, "servers": set()}
+    for e in logs:
+        if e.get("event") != "tool_call":
+            continue
+        stats["total"] += 1
+        dec = e.get("decision")
+        if dec in stats:
+            stats[dec] += 1
+        if e.get("tool_name"):
+            stats["servers"].add(e["tool_name"].split("__")[1] if e["tool_name"].startswith("mcp__") else e["tool_name"])
+    stats["servers"] = sorted(stats["servers"])
+    return stats
+
+
+def cmd_report() -> int:
+    """Pretty-print a terminal summary of all collected data."""
+    insp = _load_json(inspect_path())
+    aud = _load_json(audit_path())
+    logs = _load_log()
+    stats = _log_stats(logs)
+    cfg = load_config()
+    bold = "\033[1m"; red = "\033[31m"; yel = "\033[33m"; grn = "\033[32m"; dim = "\033[2m"; rst = "\033[0m"
+    if not sys.stdout.isatty():
+        bold = red = yel = grn = dim = rst = ""
+
+    print(f"\n{bold}mcp-guard report{rst} {dim}· {now_iso()}{rst}")
+    print(f"  action mode: {bold}{cfg.get('action')}{rst}")
+
+    # findings (poisoning)
+    findings = insp.get("findings", [])
+    head = red + "⚠ " if findings else grn
+    print(f"\n{bold}{head}Description-poisoning findings: {len(findings)}{rst}")
+    flagged_tools = {}
+    for f in findings:
+        flagged_tools.setdefault(f"{f['server']}:{f['tool']}", []).append(f["flag"])
+    for k, flags in flagged_tools.items():
+        print(f"  {red}{k}{rst}")
+        for fl in flags:
+            print(f"      · {fl}")
+
+    # servers (from inspect)
+    print(f"\n{bold}MCP servers (live tools/list):{rst}")
+    if not insp.get("servers"):
+        print(f"  {dim}(no inspect data yet — start a session to list servers){rst}")
+    for s in insp.get("servers", []):
+        status = grn + "ok" + rst if s.get("ok") else red + (s.get("error") or "failed") + rst
+        cached = "cached" if s.get("cached") else "fresh"
+        print(f"  · {bold}{s['name']}{rst} [{status}] {dim}{s.get('transport')} · {s.get('tool_count',0)} tools · {cached}{rst}")
+        for t in s.get("tools", []):
+            mark = red + "✗" if t.get("flags") else grn + "·"
+            desc = (t.get("description") or "").replace("\n", " ")[:80]
+            print(f"      {mark} {t['name']}{rst} {dim}{desc}{rst}")
+
+    # audit
+    aud_findings = aud.get("findings", [])
+    print(f"\n{bold}Config audit findings: {len(aud_findings)}{rst}")
+    for f in aud_findings:
+        print(f"  {yel}{f['server']}{rst}: {f['flag']}")
+
+    # activity
+    print(f"\n{bold}Tool-call activity (recent):{rst}")
+    print(f"  total={stats['total']} allowed={grn}{stats['allowed']}{rst} "
+          f"flagged={yel}{stats['flagged']}{rst} blocked={red}{stats['blocked']}{rst}")
+    for e in logs[:10]:
+        if e.get("event") == "tool_call":
+            c = red if e.get("decision") == "blocked" else (yel if e.get("decision") == "flagged" else dim)
+            print(f"  {c}{e.get('decision'):8}{rst} {e.get('tool_name')} {dim}{e.get('ts','')[11:19]}{rst}")
+    print()
+    return 0
+
+
+def _esc(s) -> str:
+    import html as _html
+    return _html.escape("" if s is None else str(s))
+
+
+def cmd_html() -> int:
+    """Write a self-contained HTML report and print its path."""
+    insp = _load_json(inspect_path())
+    aud = _load_json(audit_path())
+    logs = _load_log(100)
+    stats = _log_stats(logs)
+    cfg = load_config()
+
+    findings = insp.get("findings", [])
+    flagged = {}
+    for f in findings:
+        flagged.setdefault(f"{f['server']}:{f['tool']}", []).append(f["flag"])
+
+    def tool_rows(tools):
+        rows = []
+        for t in tools:
+            flags = t.get("flags") or []
+            cls = ' class="bad"' if flags else ""
+            desc = (t.get("description") or "<i>no description</i>")
+            fl = "".join(f"<span class='flag'>{_esc(x)}</span>" for x in flags)
+            rows.append(
+                f"<tr{cls}><td><code>{_esc(t.get('name'))}</code></td>"
+                f"<td>{_esc(desc) if t.get('description') else desc}<br>{fl}</td></tr>"
+            )
+        return "".join(rows)
+
+    server_cards = []
+    for s in insp.get("servers", []):
+        ok = s.get("ok")
+        badge = '<span class="badge ok">connected</span>' if ok else f'<span class="badge bad">{_esc(s.get("error") or "failed")}</span>'
+        server_cards.append(f"""
+        <div class="card">
+          <h3>{_esc(s['name'])} {badge}</h3>
+          <div class="meta">{_esc(s.get('transport'))} · {_esc(s.get('tool_count',0))} tools · {_esc(s.get('resource_count',0))} resources · {'cached' if s.get('cached') else 'fresh'} · {_esc(s.get('elapsed_ms'))}ms</div>
+          <table><thead><tr><th>Tool</th><th>Description</th></tr></thead><tbody>{tool_rows(s.get('tools', []))}</tbody></table>
+        </div>""")
+
+    aud_rows = "".join(
+        f"<tr><td><code>{_esc(f.get('server'))}</code></td><td>{_esc(f.get('source'))}</td><td>{_esc(f.get('flag'))}</td></tr>"
+        for f in aud.get("findings", [])
+    ) or '<tr><td colspan="3" class="muted">none</td></tr>'
+
+    log_rows = "".join(
+        f"<tr class=\"{e.get('decision','')}\"><td>{_esc(e.get('ts','')[11:19])}</td>"
+        f"<td><code>{_esc(e.get('tool_name'))}</code></td><td>{_esc(e.get('decision'))}</td>"
+        f"<td>{_esc(e.get('reason'))}</td></tr>"
+        for e in logs if e.get("event") == "tool_call"
+    ) or '<tr><td colspan="4" class="muted">no MCP tool calls yet</td></tr>'
+
+    banner = ""
+    if flagged:
+        items = "".join(f"<li><code>{_esc(k)}</code> — {', '.join(_esc(x) for x in v)}</li>" for k, v in flagged.items())
+        banner = f'<div class="banner"><b>⚠ {len(flagged)} tool(s) with suspicious descriptions</b><ul>{items}</ul></div>'
+
+    html_doc = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>mcp-guard report</title><style>
+ body{{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#0d1117;color:#c9d1d9;padding:24px}}
+ h1{{color:#58a6ff}} h3{{margin:0 0 8px}}
+ .sub{{color:#8b949e;margin-top:-8px}}
+ .banner{{background:#3d1f1f;border:1px solid #f85149;border-radius:8px;padding:14px 18px;margin:18px 0}}
+ .banner ul{{margin:6px 0 0}} .banner code{{background:#21152a;padding:1px 5px;border-radius:4px}}
+ .card{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin:14px 0}}
+ table{{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}}
+ td,th{{text-align:left;padding:6px 8px;border-bottom:1px solid #21262d;vertical-align:top}}
+ th{{color:#8b949e;font-weight:600}} .muted{{color:#6e7681}}
+ tr.bad td{{background:#2a1414}} code{{background:#21262d;padding:1px 5px;border-radius:4px;color:#79c0ff}}
+ .flag{{display:inline-block;background:#3d1f1f;color:#f85149;border:1px solid #6f2622;border-radius:4px;padding:0 6px;margin:2px 4px 0 0;font-size:11px}}
+ .badge{{font-size:11px;padding:2px 8px;border-radius:10px;margin-left:6px}} .ok{{background:#1a3a28;color:#3fb950}} .bad{{background:#3d1f1f;color:#f85149}}
+ .meta{{color:#8b949e;font-size:12px;margin-bottom:6px}}
+ tr.blocked td{{color:#f85149}} tr.flagged td{{color:#d29922}}
+ .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}}
+ .stat{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;text-align:center}}
+ .stat b{{display:block;font-size:26px}} .stat span{{color:#8b949e;font-size:12px}}
+</style></head><body>
+<h1>🛡 mcp-guard report</h1>
+<div class="sub">generated {now_iso()} · action mode: <b>{_esc(cfg.get('action'))}</b></div>
+{banner}
+<div class="grid">
+ <div class="stat"><b>{len(insp.get('servers',[]))}</b><span>MCP servers</span></div>
+ <div class="stat"><b>{sum(len(s.get('tools',[])) for s in insp.get('servers',[]))}</b><span>tools listed</span></div>
+ <div class="stat"><b style="color:#f85149">{len(flagged)}</b><span>poisoning findings</span></div>
+</div>
+<h2>🔎 MCP servers &amp; tool descriptions</h2>
+{''.join(server_cards) or '<p class="muted">No inspect data yet. Start a Claude Code session in a project with MCP servers configured, then refresh.</p>'}
+<h2>🔍 Config audit (on disk)</h2>
+<table><thead><tr><th>Server</th><th>Source</th><th>Flag</th></tr></thead><tbody>{aud_rows}</tbody></table>
+<h2>📝 Recent MCP tool calls</h2>
+<div class="grid">
+ <div class="stat"><b>{stats['total']}</b><span>total</span></div>
+ <div class="stat"><b style="color:#3fb950">{stats['allowed']}</b><span>allowed</span></div>
+ <div class="stat"><b style="color:#d29922">{stats['flagged']}</b><span>flagged</span></div>
+ <div class="stat"><b style="color:#f85149">{stats['blocked']}</b><span>blocked</span></div>
+</div>
+<table><thead><tr><th>Time</th><th>Tool</th><th>Decision</th><th>Reason</th></tr></thead><tbody>{log_rows}</tbody></table>
+</body></html>"""
+
+    out = guard_dir() / "report.html"
+    out.write_text(html_doc, encoding="utf-8")
+    print(str(out))
+    # best-effort open in browser
+    import shutil, subprocess
+    opener = {"linux": "xdg-open", "darwin": "open", "win32": "start"}.get(__import__("sys").platform)
+    if opener and shutil.which(opener == "start" and "cmd" or opener):
+        try:
+            subprocess.Popen([opener, str(out)] if opener != "start" else ["cmd", "/c", "start", "", str(out)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
 
 def main(argv: list[str]) -> int:
     if not argv:
-        sys.stderr.write("usage: mcp_guard.py <pre-tool-use|audit>\n")
+        sys.stderr.write("usage: mcp_guard.py <pre-tool-use|audit|inspect|report|html>\n")
         return 2
     mode = argv[0]
     if mode == "pre-tool-use":
@@ -657,6 +875,10 @@ def main(argv: list[str]) -> int:
         return cmd_audit()
     if mode == "inspect":
         return cmd_inspect()
+    if mode == "report":
+        return cmd_report()
+    if mode == "html":
+        return cmd_html()
     sys.stderr.write(f"mcp_guard.py: unknown mode {mode!r}\n")
     return 2
 
