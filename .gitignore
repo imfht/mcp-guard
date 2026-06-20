@@ -6,3 +6,7 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python bytecode
+__pycache__/
+*.pyc
