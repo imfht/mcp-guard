@@ -1,0 +1,13 @@
+{
+  "name": "mcp-guard",
+  "version": "0.1.0",
+  "description": "Security guard for MCP tools. Logs every MCP tool call, audits MCP server configs on disk, and blocks calls that match suspicious patterns. Helps detect MCP tool/prompt poisoning.",
+  "author": {
+    "name": "imfht",
+    "url": "https://github.com/imfht"
+  },
+  "homepage": "https://github.com/imfht/mcp-guard",
+  "repository": "https://github.com/imfht/mcp-guard",
+  "license": "MIT",
+  "keywords": ["mcp", "security", "audit", "guard", "model-context-protocol", "poisoning"]
+}

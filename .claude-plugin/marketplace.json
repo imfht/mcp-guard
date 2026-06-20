@@ -1,0 +1,20 @@
+{
+  "name": "mcp-guard",
+  "owner": {
+    "name": "imfht",
+    "url": "https://github.com/imfht"
+  },
+  "metadata": {
+    "version": "0.1.0",
+    "description": "Security guard marketplace for MCP tools."
+  },
+  "plugins": [
+    {
+      "name": "mcp-guard",
+      "source": ".",
+      "description": "Security guard for MCP tools: logs, audits, and blocks suspicious MCP tool calls and server configs.",
+      "category": "security",
+      "tags": ["mcp", "security", "audit", "guard"]
+    }
+  ]
+}

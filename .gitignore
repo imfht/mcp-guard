@@ -1,0 +1,8 @@
+# Local test artifacts
+/.test-tmp/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
