@@ -1,5 +1,5 @@
 {
-  "description": "MCP security guard hooks: inspect every MCP tool call and audit MCP server configs on disk.",
+  "description": "MCP security guard hooks: inspect MCP tool descriptions, log every MCP tool call, and audit MCP server configs on disk.",
   "hooks": {
     "PreToolUse": [
       {
@@ -21,6 +21,13 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp_guard.py\" audit",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp_guard.py\" inspect",
+            "timeout": 120,
+            "async": true,
+            "statusMessage": "Inspecting MCP servers"
           }
         ]
       }

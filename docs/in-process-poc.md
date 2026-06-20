@@ -1,14 +1,23 @@
 # In-process POC: enumerating MCP tool *descriptions*
 
-This plugin (`mcp-guard`) deliberately stays a **stock** installable plugin, which
-means it can only see the *hook payload* (tool name + input, on-disk config).
-It **cannot** read a tool's description/schema, because those live in-memory in
-`AppState.mcp.tools` and are never serialized to an external hook process.
+> **Update:** the stock plugin now screens tool **descriptions** without any of
+> this — its `inspect` mode acts as its own MCP client and calls `tools/list` on
+> each server directly (see the README). This in-process technique remains useful
+> for two cases the client-side `inspect` can't cover: (1) servers Claude Code has
+> already authenticated via OAuth (the guard can't reuse that session), and
+> (2) reading live `AppState` (connection state, capabilities) rather than
+> re-listing. For plain description poisoning detection, use `inspect`.
 
-This document shows the technique that *can* reach the descriptions: registering
-an **in-process `callback` hook** inside a self-built / source-patched Claude
-Code. It is included for completeness and for anyone doing deep MCP-poisoning
-research. **You do not need this to use the stock plugin.**
+This plugin (`mcp-guard`) deliberately stays a **stock** installable plugin, which
+means it can only see the *hook payload* (tool name + input, on-disk config) —
+plus whatever it can fetch itself as an MCP client. It **cannot** read a tool's
+description/schema from Claude Code's in-memory `AppState.mcp.tools`, because that
+is never serialized to an external hook process.
+
+This document shows the technique that *can* reach the in-memory state:
+registering an **in-process `callback` hook** inside a self-built / source-patched
+Claude Code. It is included for completeness and for anyone doing deep
+MCP-poisoning research. **You do not need this to use the stock plugin.**
 
 ## Why a stock plugin can't do this
 
