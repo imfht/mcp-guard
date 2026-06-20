@@ -1,5 +1,7 @@
 # mcp-guard
 
+> **English** · [中文](README.zh-CN.md)
+
 A security guard **plugin for [Claude Code](https://docs.claude.com/en/docs/claude-code)** that watches the Model Context Protocol (MCP) surface for tool/prompt **poisoning** — including hidden instructions buried in tool **descriptions**.
 
 It does four things, all from **stock installable hooks** (no source patching, no rebuild, no extra dependencies — Python 3 stdlib only):
